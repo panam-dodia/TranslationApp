@@ -1,0 +1,60 @@
+# =====================
+# Android / Gradle
+# =====================
+*.apk
+*.aar
+*.aab
+*.dex
+*.class
+
+/build
+**/build/
+
+.gradle/
+.cxx/
+.externalNativeBuild/
+
+# Local config
+local.properties
+
+# =====================
+# Android Studio / IntelliJ
+# =====================
+.idea/
+*.iml
+
+# Optional IDEA files
+.idea/caches
+.idea/libraries
+.idea/modules.xml
+.idea/workspace.xml
+.idea/navEditor.xml
+.idea/assetWizardSettings.xml
+
+# =====================
+# OS files
+# =====================
+.DS_Store
+Thumbs.db
+
+# =====================
+# Logs
+# =====================
+*.log
+
+# =====================
+# Kotlin / JVM
+# =====================
+out/
+
+# =====================
+# Generated captures
+# =====================
+captures/
+
+# =====================
+# Windows reserved junk
+# =====================
+nul
+
+app/src/main/assets/
