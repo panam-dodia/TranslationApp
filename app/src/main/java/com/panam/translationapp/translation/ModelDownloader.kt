@@ -30,8 +30,8 @@ class ModelDownloader(private val context: Context) {
     }
 
     /**
-     * Download complete model package for a language pair
-     * Includes encoder, decoder, and vocab files
+     * Download complete model package for a language pair from Hugging Face
+     * Uses quantized ONNX models for smaller size and faster inference
      */
     suspend fun downloadModelPair(
         fromLang: Language,
@@ -48,33 +48,42 @@ class ModelDownloader(private val context: Context) {
 
             modelDir.mkdirs()
 
-            // Download all required files
+            // Get base URL for this language pair
             val baseUrl = getModelBaseUrl(fromLang, toLang)
                 ?: return@withContext Result.failure(Exception("Model URL not configured for $modelKey"))
 
-            val files = listOf(
-                "encoder_model.onnx",
-                "decoder_with_past_model.onnx",
-                "vocab.json",
-                "config.json",
-                "generation_config.json",
-                "special_tokens_map.json",
-                "tokenizer_config.json"
+            // Files to download with their locations
+            // ONNX models are in /onnx/ subdirectory, configs are in root
+            val filesToDownload = listOf(
+                // Quantized ONNX models (smaller size, good quality)
+                "onnx/encoder_model_quantized.onnx" to "encoder_model.onnx",
+                "onnx/decoder_with_past_model_quantized.onnx" to "decoder_with_past_model.onnx",
+
+                // Configuration files from root directory
+                "vocab.json" to "vocab.json",
+                "config.json" to "config.json",
+                "generation_config.json" to "generation_config.json",
+                "tokenizer_config.json" to "tokenizer_config.json",
+                "source.spm" to "source.spm",
+                "target.spm" to "target.spm"
             )
 
-            for ((index, filename) in files.withIndex()) {
-                val progress = index.toFloat() / files.size
-                onProgress("Downloading $filename", progress)
+            for ((index, filePair) in filesToDownload.withIndex()) {
+                val (remotePath, localName) = filePair
+                val progress = index.toFloat() / filesToDownload.size
+                onProgress("Downloading $localName", progress)
 
                 val result = downloadFile(
-                    url = "$baseUrl/$filename",
-                    destFile = File(modelDir, filename)
+                    url = "$baseUrl/$remotePath",
+                    destFile = File(modelDir, localName)
                 )
 
                 if (result.isFailure) {
                     // Clean up partial download
                     modelDir.deleteRecursively()
-                    return@withContext result
+                    return@withContext Result.failure(
+                        Exception("Failed to download $remotePath: ${result.exceptionOrNull()?.message}")
+                    )
                 }
             }
 
@@ -119,17 +128,59 @@ class ModelDownloader(private val context: Context) {
     }
 
     /**
-     * Get base URL for model files
-     * TODO: Replace with your CDN/server URLs
+     * Get base URL for model files from Hugging Face
+     * Using Xenova's pre-converted OPUS-MT ONNX models
+     *
+     * These models are:
+     * - Free to use (CC-BY 4.0 license - commercial use allowed)
+     * - Quantized for mobile (~50-100MB per direction)
+     * - High quality translations
      */
-    private fun getModelBaseUrl(fromLang: Language, toLang: Language): String? {
+    fun getModelBaseUrl(fromLang: Language, toLang: Language): String? {
         val modelKey = "${fromLang.code}-${toLang.code}"
 
-        // TODO: Host your ONNX models and update these URLs
-        // Example: return "https://your-cdn.com/models/$modelKey"
+        // Map of supported language pairs with their Hugging Face model URLs
+        // IMPORTANT: Only Xenova models have quantized ONNX versions
+        // Helsinki-NLP models are PyTorch/TensorFlow only (not compatible with our ONNX setup)
+        val supportedModels = mapOf(
+            // === ENGLISH-CENTRIC PAIRS (ONNX available from Xenova) ===
+            // English to other languages
+            "en-es" to "https://huggingface.co/Xenova/opus-mt-en-es/resolve/main",
+            "en-fr" to "https://huggingface.co/Xenova/opus-mt-en-fr/resolve/main",
+            "en-de" to "https://huggingface.co/Xenova/opus-mt-en-de/resolve/main",
+            "en-it" to "https://huggingface.co/Xenova/opus-mt-en-it/resolve/main",
+            "en-pt" to "https://huggingface.co/Xenova/opus-mt-en-pt/resolve/main",
+            "en-zh" to "https://huggingface.co/Xenova/opus-mt-en-zh/resolve/main",
+            "en-ja" to "https://huggingface.co/Xenova/opus-mt-en-jap/resolve/main",
+            "en-ar" to "https://huggingface.co/Xenova/opus-mt-en-ar/resolve/main",
+            "en-ru" to "https://huggingface.co/Xenova/opus-mt-en-ru/resolve/main",
+            "en-hi" to "https://huggingface.co/Xenova/opus-mt-en-hi/resolve/main",
+            "en-ko" to "https://huggingface.co/Xenova/opus-mt-en-ko/resolve/main",
 
-        // For now, return null - you need to host the models
-        return null
+            // Other languages to English
+            "es-en" to "https://huggingface.co/Xenova/opus-mt-es-en/resolve/main",
+            "fr-en" to "https://huggingface.co/Xenova/opus-mt-fr-en/resolve/main",
+            "de-en" to "https://huggingface.co/Xenova/opus-mt-de-en/resolve/main",
+            "it-en" to "https://huggingface.co/Xenova/opus-mt-it-en/resolve/main",
+            "pt-en" to "https://huggingface.co/Xenova/opus-mt-pt-en/resolve/main",
+            "zh-en" to "https://huggingface.co/Xenova/opus-mt-zh-en/resolve/main",
+            "ja-en" to "https://huggingface.co/Xenova/opus-mt-jap-en/resolve/main",
+            "ar-en" to "https://huggingface.co/Xenova/opus-mt-ar-en/resolve/main",
+            "ru-en" to "https://huggingface.co/Xenova/opus-mt-ru-en/resolve/main",
+            "ko-en" to "https://huggingface.co/Xenova/opus-mt-ko-en/resolve/main"
+
+            // Note: Some reverse pairs (hi-en, ko-en, etc.) may not be available in ONNX
+            // When a direction is missing, only one-way translation will work
+            // Direct non-English pairs (es-fr, de-fr, etc.) exist but are NOT in ONNX format
+            // For non-English pairs, automatic pivot through English is used
+        )
+
+        // If not found in map, return null (model not available)
+        val url = supportedModels[modelKey]
+        if (url == null) {
+            Log.w(TAG, "Model $modelKey not available. Available pairs: ${supportedModels.keys}")
+        }
+        return url
     }
 
     fun isModelDownloaded(fromLang: Language, toLang: Language): Boolean {

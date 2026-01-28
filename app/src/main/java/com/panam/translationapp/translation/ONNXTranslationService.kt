@@ -26,16 +26,54 @@ class ONNXTranslationService(private val context: Context) : TranslationService 
         toLang: Language
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
-            val modelKey = "${fromLang.code}-${toLang.code}"
-
-            // Check if model is downloaded, if not return error
-            if (!modelDownloader.isModelDownloaded(fromLang, toLang)) {
-                return@withContext Result.failure(
-                    Exception("Model for ${fromLang.displayName}→${toLang.displayName} not downloaded. Please download it first.")
-                )
+            // Check if direct translation model exists
+            if (modelDownloader.isModelDownloaded(fromLang, toLang)) {
+                // Direct translation available
+                return@withContext translateDirect(text, fromLang, toLang)
             }
 
-            // Load model if not already loaded or if different language pair
+            // Check if pivot translation through English is possible
+            if (fromLang != Language.ENGLISH && toLang != Language.ENGLISH) {
+                // Try pivot: source → English → target
+                if (modelDownloader.isModelDownloaded(fromLang, Language.ENGLISH) &&
+                    modelDownloader.isModelDownloaded(Language.ENGLISH, toLang)) {
+                    Log.d(TAG, "Using pivot translation: ${fromLang.code}→en→${toLang.code}")
+                    return@withContext translateViaPivot(text, fromLang, toLang)
+                }
+            }
+
+            // Build helpful error message
+            val modelKey = "${fromLang.code}-${toLang.code}"
+            val errorMessage = if (modelDownloader.getModelBaseUrl(fromLang, toLang) == null) {
+                // Model doesn't exist in ONNX format
+                "${fromLang.displayName}→${toLang.displayName} translation is not available yet. " +
+                "This model hasn't been converted to ONNX format. " +
+                "Try translating in the opposite direction or using a different language pair."
+            } else {
+                // Model exists but not downloaded
+                "No translation model available for ${fromLang.displayName}→${toLang.displayName}. " +
+                "Please download the required models."
+            }
+
+            return@withContext Result.failure(Exception(errorMessage))
+        } catch (e: Exception) {
+            Log.e(TAG, "Translation failed", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Direct translation using a single model
+     */
+    private suspend fun translateDirect(
+        text: String,
+        fromLang: Language,
+        toLang: Language
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val modelKey = "${fromLang.code}-${toLang.code}"
+
+            // Load model if not already loaded
             if (!loadedEngines.containsKey(modelKey)) {
                 loadModel(fromLang, toLang)
             }
@@ -65,7 +103,49 @@ class ONNXTranslationService(private val context: Context) : TranslationService 
 
             Result.success(translatedText)
         } catch (e: Exception) {
-            Log.e(TAG, "Translation failed", e)
+            Log.e(TAG, "Direct translation failed", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Pivot translation through English (source → English → target)
+     * Used when no direct model exists between language pairs
+     */
+    private suspend fun translateViaPivot(
+        text: String,
+        fromLang: Language,
+        toLang: Language
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            Log.d(TAG, "Pivot translation: ${fromLang.displayName}→English→${toLang.displayName}")
+
+            // Step 1: Translate to English
+            val englishResult = translateDirect(text, fromLang, Language.ENGLISH)
+            if (englishResult.isFailure) {
+                return@withContext Result.failure(
+                    Exception("Failed to translate to English: ${englishResult.exceptionOrNull()?.message}")
+                )
+            }
+
+            val englishText = englishResult.getOrNull()!!
+            Log.d(TAG, "✓ Step 1: $text → $englishText")
+
+            // Step 2: Translate from English to target
+            val finalResult = translateDirect(englishText, Language.ENGLISH, toLang)
+            if (finalResult.isFailure) {
+                return@withContext Result.failure(
+                    Exception("Failed to translate from English: ${finalResult.exceptionOrNull()?.message}")
+                )
+            }
+
+            val finalText = finalResult.getOrNull()!!
+            Log.d(TAG, "✓ Step 2: $englishText → $finalText")
+            Log.d(TAG, "✓ Pivot complete: \"$text\" → \"$finalText\"")
+
+            Result.success(finalText)
+        } catch (e: Exception) {
+            Log.e(TAG, "Pivot translation failed", e)
             Result.failure(e)
         }
     }
@@ -103,8 +183,90 @@ class ONNXTranslationService(private val context: Context) : TranslationService 
         return modelDownloader.downloadModelPair(fromLang, toLang, onProgress)
     }
 
+    /**
+     * Download all required models for a language (to/from English)
+     * This enables translation to/from any other supported language
+     * Note: Some languages may only have one direction available
+     */
+    suspend fun downloadLanguageModels(
+        language: Language,
+        onProgress: (String, Float) -> Unit = { _, _ -> }
+    ): Result<Unit> {
+        if (language == Language.ENGLISH) {
+            return Result.success(Unit) // English doesn't need models for itself
+        }
+
+        var successCount = 0
+        var failureMessages = mutableListOf<String>()
+
+        // Try to download both directions: language ↔ English
+        // Check if model URL exists before attempting download
+
+        // 1. Try language → English
+        if (modelDownloader.getModelBaseUrl(language, Language.ENGLISH) != null) {
+            val toEnglishResult = modelDownloader.downloadModelPair(language, Language.ENGLISH) { msg, prog ->
+                onProgress("${language.displayName}→English: $msg", prog * 0.5f)
+            }
+            if (toEnglishResult.isSuccess) {
+                successCount++
+            } else {
+                failureMessages.add("${language.displayName}→English failed: ${toEnglishResult.exceptionOrNull()?.message}")
+            }
+        } else {
+            Log.w(TAG, "${language.displayName}→English model not available in ONNX format")
+            failureMessages.add("${language.displayName}→English: Model not available")
+        }
+
+        // 2. Try English → language
+        if (modelDownloader.getModelBaseUrl(Language.ENGLISH, language) != null) {
+            val fromEnglishResult = modelDownloader.downloadModelPair(Language.ENGLISH, language) { msg, prog ->
+                onProgress("English→${language.displayName}: $msg", 0.5f + (prog * 0.5f))
+            }
+            if (fromEnglishResult.isSuccess) {
+                successCount++
+            } else {
+                failureMessages.add("English→${language.displayName} failed: ${fromEnglishResult.exceptionOrNull()?.message}")
+            }
+        } else {
+            Log.w(TAG, "English→${language.displayName} model not available in ONNX format")
+            failureMessages.add("English→${language.displayName}: Model not available")
+        }
+
+        // Return success if at least one direction worked
+        return if (successCount > 0) {
+            if (successCount == 1) {
+                Log.w(TAG, "Only one direction available for ${language.displayName}. Some translations may not work.")
+            }
+            Result.success(Unit)
+        } else {
+            Result.failure(Exception("Failed to download any models for ${language.displayName}: ${failureMessages.joinToString(", ")}"))
+        }
+    }
+
+    /**
+     * Check if models for a language are downloaded
+     * Returns true if at least one direction is available
+     */
+    fun isLanguageDownloaded(language: Language): Boolean {
+        if (language == Language.ENGLISH) return true
+        // Accept if at least one direction is available
+        return modelDownloader.isModelDownloaded(language, Language.ENGLISH) ||
+               modelDownloader.isModelDownloaded(Language.ENGLISH, language)
+    }
+
     override fun isModelDownloaded(fromLang: Language, toLang: Language): Boolean {
-        return modelDownloader.isModelDownloaded(fromLang, toLang)
+        // Check if direct model exists
+        if (modelDownloader.isModelDownloaded(fromLang, toLang)) {
+            return true
+        }
+
+        // Check if pivot through English is possible
+        if (fromLang != Language.ENGLISH && toLang != Language.ENGLISH) {
+            return modelDownloader.isModelDownloaded(fromLang, Language.ENGLISH) &&
+                   modelDownloader.isModelDownloaded(Language.ENGLISH, toLang)
+        }
+
+        return false
     }
 
     fun getModelSize(fromLang: Language, toLang: Language): Long {

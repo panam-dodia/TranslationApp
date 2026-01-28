@@ -201,39 +201,38 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
             val lang1 = _state.value.person1Language ?: return@launch
             val lang2 = _state.value.person2Language ?: return@launch
 
-            // Download person1 -> person2 model if needed
-            if (!translationService.isModelDownloaded(lang1, lang2)) {
-                _state.update { it.copy(isDownloadingModel = true) }
+            _state.update { it.copy(isDownloadingModel = true) }
 
-                val result = translationService.downloadModel(lang1, lang2) { message, progress ->
-                    _state.update {
-                        it.copy(
-                            downloadMessage = "${lang1.displayName}→${lang2.displayName}: $message",
-                            downloadProgress = progress
-                        )
-                    }
-                }
+            // Download models for each language (not pairs!)
+            // This way models are reused across any language combination
 
-                if (result.isFailure) {
-                    _state.update {
-                        it.copy(
-                            error = "Failed to download ${lang1.displayName}→${lang2.displayName} model: ${result.exceptionOrNull()?.message}",
-                            isDownloadingModel = false
-                        )
-                    }
-                    return@launch
-                }
+            // Collect unique languages that need models
+            val languagesToDownload = mutableSetOf<Language>()
+            if (!translationService.isLanguageDownloaded(lang1)) {
+                languagesToDownload.add(lang1)
+            }
+            if (!translationService.isLanguageDownloaded(lang2)) {
+                languagesToDownload.add(lang2)
             }
 
-            // Download person2 -> person1 model if needed
-            if (!translationService.isModelDownloaded(lang2, lang1)) {
-                _state.update { it.copy(isDownloadingModel = true) }
+            if (languagesToDownload.isEmpty()) {
+                // All models already downloaded
+                _state.update { it.copy(isDownloadingModel = false) }
+                checkModelsDownloaded()
+                return@launch
+            }
 
-                val result = translationService.downloadModel(lang2, lang1) { message, progress ->
+            // Download each language's models
+            var currentProgress = 0
+            val totalLanguages = languagesToDownload.size
+
+            for ((index, language) in languagesToDownload.withIndex()) {
+                val result = translationService.downloadLanguageModels(language) { message, progress ->
+                    val overallProgress = (index.toFloat() / totalLanguages) + (progress / totalLanguages)
                     _state.update {
                         it.copy(
-                            downloadMessage = "${lang2.displayName}→${lang1.displayName}: $message",
-                            downloadProgress = progress
+                            downloadMessage = message,
+                            downloadProgress = overallProgress
                         )
                     }
                 }
@@ -241,7 +240,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
                 if (result.isFailure) {
                     _state.update {
                         it.copy(
-                            error = "Failed to download ${lang2.displayName}→${lang1.displayName} model: ${result.exceptionOrNull()?.message}",
+                            error = "Failed to download ${language.displayName} models: ${result.exceptionOrNull()?.message}",
                             isDownloadingModel = false
                         )
                     }
@@ -258,6 +257,8 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         val lang1 = _state.value.person1Language ?: return
         val lang2 = _state.value.person2Language ?: return
 
+        // Check if translation is possible in both directions
+        // This considers both direct models and pivot through English
         val p1ToP2 = translationService.isModelDownloaded(lang1, lang2)
         val p2ToP1 = translationService.isModelDownloaded(lang2, lang1)
 
