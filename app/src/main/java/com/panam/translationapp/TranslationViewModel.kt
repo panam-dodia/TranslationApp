@@ -6,9 +6,8 @@ import androidx.lifecycle.viewModelScope
 import com.panam.translationapp.speech.SpeechRecognitionResult
 import com.panam.translationapp.speech.SpeechRecognitionService
 import com.panam.translationapp.speech.TextToSpeechService
-import com.panam.translationapp.translation.AssetModelMigrator
 import com.panam.translationapp.translation.Language
-import com.panam.translationapp.translation.ONNXTranslationService
+import com.panam.translationapp.translation.NLLBTranslationService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -34,17 +33,12 @@ data class TranslationState(
 )
 
 class TranslationViewModel(application: Application) : AndroidViewModel(application) {
-    private val translationService = ONNXTranslationService(application)
+    private val translationService = NLLBTranslationService(application)
     private val speechRecognitionService = SpeechRecognitionService(application)
     private val ttsService = TextToSpeechService(application)
 
     private val _state = MutableStateFlow(TranslationState())
     val state: StateFlow<TranslationState> = _state.asStateFlow()
-
-    init {
-        // Migrate models from assets to proper directory (one-time)
-        AssetModelMigrator.migrateAssetsIfNeeded(application)
-    }
 
     fun setLanguages(language1: Language, language2: Language) {
         _state.update {
@@ -198,54 +192,33 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
 
     fun downloadModelsIfNeeded() {
         viewModelScope.launch {
-            val lang1 = _state.value.person1Language ?: return@launch
-            val lang2 = _state.value.person2Language ?: return@launch
-
-            _state.update { it.copy(isDownloadingModel = true) }
-
-            // Download models for each language (not pairs!)
-            // This way models are reused across any language combination
-
-            // Collect unique languages that need models
-            val languagesToDownload = mutableSetOf<Language>()
-            if (!translationService.isLanguageDownloaded(lang1)) {
-                languagesToDownload.add(lang1)
-            }
-            if (!translationService.isLanguageDownloaded(lang2)) {
-                languagesToDownload.add(lang2)
-            }
-
-            if (languagesToDownload.isEmpty()) {
-                // All models already downloaded
-                _state.update { it.copy(isDownloadingModel = false) }
+            // Check if NLLB model is already downloaded
+            if (translationService.isLanguageDownloaded(Language.ENGLISH)) {
+                // Model already downloaded (one model handles ALL language pairs)
                 checkModelsDownloaded()
                 return@launch
             }
 
-            // Download each language's models
-            var currentProgress = 0
-            val totalLanguages = languagesToDownload.size
+            _state.update { it.copy(isDownloadingModel = true) }
 
-            for ((index, language) in languagesToDownload.withIndex()) {
-                val result = translationService.downloadLanguageModels(language) { message, progress ->
-                    val overallProgress = (index.toFloat() / totalLanguages) + (progress / totalLanguages)
-                    _state.update {
-                        it.copy(
-                            downloadMessage = message,
-                            downloadProgress = overallProgress
-                        )
-                    }
+            // Download single NLLB model (~890MB) that handles ALL language pairs
+            val result = translationService.downloadModel { message, progress ->
+                _state.update {
+                    it.copy(
+                        downloadMessage = message,
+                        downloadProgress = progress
+                    )
                 }
+            }
 
-                if (result.isFailure) {
-                    _state.update {
-                        it.copy(
-                            error = "Failed to download ${language.displayName} models: ${result.exceptionOrNull()?.message}",
-                            isDownloadingModel = false
-                        )
-                    }
-                    return@launch
+            if (result.isFailure) {
+                _state.update {
+                    it.copy(
+                        error = "Failed to download NLLB model: ${result.exceptionOrNull()?.message}",
+                        isDownloadingModel = false
+                    )
                 }
+                return@launch
             }
 
             _state.update { it.copy(isDownloadingModel = false, downloadProgress = 0f, downloadMessage = "") }
@@ -257,15 +230,13 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         val lang1 = _state.value.person1Language ?: return
         val lang2 = _state.value.person2Language ?: return
 
-        // Check if translation is possible in both directions
-        // This considers both direct models and pivot through English
-        val p1ToP2 = translationService.isModelDownloaded(lang1, lang2)
-        val p2ToP1 = translationService.isModelDownloaded(lang2, lang1)
+        // With NLLB, single model handles ALL language pairs in both directions
+        val modelDownloaded = translationService.isModelDownloaded(lang1, lang2)
 
         _state.update {
             it.copy(
-                person1ToPerson2ModelDownloaded = p1ToP2,
-                person2ToPerson1ModelDownloaded = p2ToP1
+                person1ToPerson2ModelDownloaded = modelDownloaded,
+                person2ToPerson1ModelDownloaded = modelDownloaded
             )
         }
     }

@@ -56,14 +56,6 @@ fun TranslationScreen(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
-        // Show download overlay if downloading
-        if (state.isDownloadingModel) {
-            ModelDownloadOverlay(
-                message = state.downloadMessage,
-                progress = state.downloadProgress
-            )
-        }
-
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -133,6 +125,14 @@ fun TranslationScreen(
             ) {
                 Text(error)
             }
+        }
+
+        // Download overlay - rendered last so it appears on top
+        if (state.isDownloadingModel) {
+            ModelDownloadOverlay(
+                message = state.downloadMessage,
+                progress = state.downloadProgress
+            )
         }
     }
 }
@@ -352,11 +352,16 @@ fun CenterControls(
 
         // Show download button if models not available
         if (!person1ToPerson2ModelDownloaded || !person2ToPerson1ModelDownloaded) {
-            Spacer(modifier = Modifier.height(8.dp))
-            TextButton(onClick = onDownloadModels) {
+            Spacer(modifier = Modifier.height(12.dp))
+            Button(
+                onClick = onDownloadModels,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary
+                )
+            ) {
                 Text(
-                    text = "Download Models",
-                    style = MaterialTheme.typography.labelSmall
+                    text = "Download Model (~890MB)",
+                    style = MaterialTheme.typography.labelMedium
                 )
             }
         }
@@ -371,36 +376,67 @@ fun ModelDownloadOverlay(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background.copy(alpha = 0.95f)),
+            .background(Color.Black.copy(alpha = 0.85f)),
         contentAlignment = Alignment.Center
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.padding(32.dp)
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.85f)
+                .padding(32.dp),
+            color = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(16.dp),
+            tonalElevation = 8.dp
         ) {
-            Text(
-                text = "Downloading Model",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onBackground
-            )
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.padding(24.dp)
+            ) {
+                Text(
+                    text = "Downloading NLLB Model",
+                    style = MaterialTheme.typography.titleLarge.copy(
+                        fontWeight = FontWeight.SemiBold
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
 
-            Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
-            LinearProgressIndicator(
-                progress = { progress },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(4.dp),
-            )
+                Text(
+                    text = "This may take a few minutes",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                )
 
-            Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(24.dp))
 
-            Text(
-                text = message,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
-                textAlign = TextAlign.Center
-            )
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(6.dp)
+                        .clip(RoundedCornerShape(3.dp)),
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Text(
+                    text = if (message.isNotEmpty()) message else "Preparing download...",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                    textAlign = TextAlign.Center,
+                    maxLines = 2
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = "${(progress * 100).toInt()}%",
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold
+                    ),
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
         }
     }
 }
