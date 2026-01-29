@@ -22,6 +22,7 @@ class NLLBInferenceEngine(
     private var ortEnvironment: OrtEnvironment? = null
     private var encoderSession: OrtSession? = null
     private var decoderSession: OrtSession? = null
+    private var decoderWithPastSession: OrtSession? = null  // Decoder with KV cache
 
     private val maxGenerationLength = 100
     private val eosTokenId = 2  // NLLB EOS token ID
@@ -41,6 +42,7 @@ class NLLBInferenceEngine(
             // NLLB uses quantized models
             val encoderPath = File(modelDirectory, "encoder_model_quantized.onnx").absolutePath
             val decoderPath = File(modelDirectory, "decoder_model_quantized.onnx").absolutePath
+            val decoderWithPastPath = File(modelDirectory, "decoder_with_past_model_quantized.onnx").absolutePath
 
             // Fallback to non-quantized if quantized not found
             val encoderFile = if (File(encoderPath).exists()) {
@@ -55,8 +57,21 @@ class NLLBInferenceEngine(
                 File(modelDirectory, "decoder_model.onnx")
             }
 
+            val decoderWithPastFile = if (File(decoderWithPastPath).exists()) {
+                File(decoderWithPastPath)
+            } else {
+                File(modelDirectory, "decoder_with_past_model.onnx")
+            }
+
             if (!encoderFile.exists() || !decoderFile.exists()) {
                 throw Exception("Model files not found in ${modelDirectory.absolutePath}")
+            }
+
+            // Check for decoder_with_past (required for KV cache)
+            if (!decoderWithPastFile.exists()) {
+                Log.w(TAG, "⚠ decoder_with_past_model not found - KV cache disabled")
+                Log.w(TAG, "   Translation will be slow and may produce poor results")
+                Log.w(TAG, "   Re-export model with use_cache=True")
             }
 
             // Create sessions with optimization
@@ -66,6 +81,12 @@ class NLLBInferenceEngine(
 
             encoderSession = ortEnvironment?.createSession(encoderFile.absolutePath, sessionOptions)
             decoderSession = ortEnvironment?.createSession(decoderFile.absolutePath, sessionOptions)
+
+            // Load decoder with past if available
+            if (decoderWithPastFile.exists()) {
+                decoderWithPastSession = ortEnvironment?.createSession(decoderWithPastFile.absolutePath, sessionOptions)
+                Log.d(TAG, "✓ Loaded decoder_with_past for KV cache")
+            }
 
             Log.d(TAG, "✓ NLLB models loaded from ${modelDirectory.name}")
             logSessionInfo()
@@ -81,8 +102,23 @@ class NLLBInferenceEngine(
             Log.d(TAG, "Encoder outputs: ${encoder.outputNames}")
         }
         decoderSession?.let { decoder ->
-            Log.d(TAG, "Decoder inputs: ${decoder.inputNames}")
-            Log.d(TAG, "Decoder outputs: ${decoder.outputNames}")
+            Log.d(TAG, "Decoder inputs (${decoder.inputNames.size}): ${decoder.inputNames}")
+            Log.d(TAG, "Decoder outputs (${decoder.outputNames.size}): ${decoder.outputNames}")
+        }
+        decoderWithPastSession?.let { decoderWithPast ->
+            Log.d(TAG, "Decoder-with-past inputs (${decoderWithPast.inputNames.size}): ${decoderWithPast.inputNames}")
+            Log.d(TAG, "Decoder-with-past outputs (${decoderWithPast.outputNames.size}): ${decoderWithPast.outputNames}")
+
+            // Check if model supports KV cache
+            val hasPastKeyValues = decoderWithPast.inputNames.any { it.contains("past") }
+            if (hasPastKeyValues) {
+                Log.d(TAG, "✓ Model SUPPORTS KV cache (has past_key_values inputs)")
+            } else {
+                Log.w(TAG, "⚠ Decoder-with-past does NOT have past_key_values inputs!")
+            }
+        } ?: run {
+            Log.w(TAG, "⚠ No decoder_with_past model - KV cache disabled")
+            Log.w(TAG, "   Translation will be slow and may produce poor results")
         }
     }
 
@@ -158,7 +194,7 @@ class NLLBInferenceEngine(
     }
 
     /**
-     * Run decoder with greedy decoding
+     * Run decoder with greedy decoding using KV cache
      * Uses forcedBosTokenId as the first decoder token (target language code)
      */
     private fun runDecoder(
@@ -184,108 +220,161 @@ class NLLBInferenceEngine(
             encoderOutputShape
         )
 
+        // Encoder attention mask (created once, reused)
+        val encoderMask = LongArray(encoderSeqLength) { 1L }
+        val encoderMaskShape = longArrayOf(1, encoderSeqLength.toLong())
+        val encoderMaskTensor = OnnxTensor.createTensor(
+            env,
+            LongBuffer.wrap(encoderMask),
+            encoderMaskShape
+        )
+
+        val hasKVCache = decoderWithPastSession != null
         Log.d(TAG, "Starting decoder loop with forcedBosTokenId=$forcedBosTokenId, maxLength=$maxGenerationLength")
+        Log.d(TAG, "KV cache available: $hasKVCache")
+
+        // Store past key-value cache
+        var pastKeyValues: OrtSession.Result? = null
 
         try {
             // Greedy decoding loop
             for (step in 0 until maxGenerationLength) {
                 Log.d(TAG, "=== Decoder Step $step, Generated so far: ${generatedIds.size} tokens ===")
 
-                // Prepare decoder input
-                val decoderInputIds = generatedIds.map { it.toLong() }.toLongArray()
-                val decoderShape = longArrayOf(1, generatedIds.size.toLong())
+                // Choose which decoder to use
+                val currentDecoder = if (pastKeyValues == null || !hasKVCache) {
+                    // First iteration: use regular decoder (no past inputs)
+                    Log.d(TAG, "Using decoder_model (no cache)")
+                    decoder
+                } else {
+                    // Subsequent iterations: use decoder_with_past (with KV cache)
+                    Log.d(TAG, "Using decoder_with_past_model (with cache)")
+                    decoderWithPastSession!!
+                }
 
-                Log.d(TAG, "Decoder input IDs: ${decoderInputIds.joinToString(", ")}")
+                // Prepare decoder input - only last token when using cache
+                val inputIds = if (pastKeyValues == null) {
+                    // First iteration: use all generated tokens so far
+                    generatedIds.map { it.toLong() }.toLongArray()
+                } else {
+                    // Subsequent iterations: only the last token (with KV cache)
+                    longArrayOf(generatedIds.last().toLong())
+                }
+
+                val decoderShape = longArrayOf(1, inputIds.size.toLong())
+                Log.d(TAG, "Decoder input IDs: ${inputIds.joinToString(", ")} (using cache: ${pastKeyValues != null})")
 
                 val decoderInputTensor = OnnxTensor.createTensor(
                     env,
-                    LongBuffer.wrap(decoderInputIds),
+                    LongBuffer.wrap(inputIds),
                     decoderShape
                 )
 
-                // Encoder attention mask
-                val encoderMask = LongArray(encoderSeqLength) { 1L }
-                val encoderMaskShape = longArrayOf(1, encoderSeqLength.toLong())
-                val encoderMaskTensor = OnnxTensor.createTensor(
-                    env,
-                    LongBuffer.wrap(encoderMask),
-                    encoderMaskShape
-                )
-
-                // Run decoder
-                val decoderInputs = mapOf(
+                // Build decoder inputs
+                val decoderInputs = mutableMapOf<String, OnnxTensor>(
                     "input_ids" to decoderInputTensor,
                     "encoder_hidden_states" to encoderOutputTensor,
                     "encoder_attention_mask" to encoderMaskTensor
                 )
 
-            val decoderResults = decoder.run(decoderInputs)
+                // Add past key-value cache if available
+                if (pastKeyValues != null && hasKVCache) {
+                    // Add all past_key_values inputs from previous iteration
+                    val outputNames = pastKeyValues.iterator().asSequence().map { it.key }.toList()
+                    var addedCount = 0
 
-            // Get logits from first output
-            val logitsOutput = decoderResults[0].value
+                    for (outputName in outputNames) {
+                        // Skip the logits output (first output)
+                        if (outputName == "logits") continue
 
-            // Handle different output types
-            val nextTokenId = when (logitsOutput) {
-                is OnnxTensor -> {
-                    // OnnxTensor format
-                    val logitsBuffer = logitsOutput.floatBuffer
-                    val vocabSize = logitsOutput.info.shape[2].toInt()
-                    val lastTokenPosition = generatedIds.size - 1
-                    val lastTokenOffset = lastTokenPosition * vocabSize
-                    val lastTokenLogits = FloatArray(vocabSize)
-                    logitsBuffer.position(lastTokenOffset)
-                    logitsBuffer.get(lastTokenLogits)
-                    lastTokenLogits.indices.maxByOrNull { lastTokenLogits[it] } ?: eosTokenId
+                        // Convert "present.X.Y.Z" to "past_key_values.X.Y.Z"
+                        val inputName = outputName.replace("present.", "past_key_values.")
+
+                        val pastTensor = pastKeyValues[outputName] as? OnnxTensor
+                        if (pastTensor != null) {
+                            decoderInputs[inputName] = pastTensor
+                            addedCount++
+                        }
+                    }
+                    Log.d(TAG, "Added $addedCount past_key_values tensors to decoder_with_past")
                 }
-                is Array<*> -> {
-                    // Array format (nested arrays)
-                    val logits = logitsOutput as Array<Array<FloatArray>>
-                    val lastTokenPosition = generatedIds.size - 1
-                    Log.d(TAG, "Extracting logits for position $lastTokenPosition (total positions: ${logits[0].size})")
 
-                    val lastTokenLogits = logits[0][lastTokenPosition]
-                    val tokenId = lastTokenLogits.indices.maxByOrNull { lastTokenLogits[it] } ?: eosTokenId
+                // Run decoder
+                val decoderResults = currentDecoder.run(decoderInputs)
 
-                    Log.d(TAG, "Selected token ID: $tokenId (max logit: ${lastTokenLogits[tokenId]})")
-                    tokenId
+                // Get logits from first output
+                val logitsOutput = decoderResults[0].value
+
+                // Extract next token ID from logits
+                val nextTokenId = when (logitsOutput) {
+                    is OnnxTensor -> {
+                        // OnnxTensor format
+                        val logitsBuffer = logitsOutput.floatBuffer
+                        val vocabSize = logitsOutput.info.shape[2].toInt()
+                        val lastTokenPosition = (logitsOutput.info.shape[1] - 1).toInt()
+                        val lastTokenOffset = lastTokenPosition * vocabSize
+                        val lastTokenLogits = FloatArray(vocabSize)
+                        logitsBuffer.position(lastTokenOffset)
+                        logitsBuffer.get(lastTokenLogits)
+                        lastTokenLogits.indices.maxByOrNull { lastTokenLogits[it] } ?: eosTokenId
+                    }
+                    is Array<*> -> {
+                        // Array format (nested arrays)
+                        val logits = logitsOutput as Array<Array<FloatArray>>
+                        val lastTokenPosition = logits[0].size - 1
+                        Log.d(TAG, "Extracting logits for position $lastTokenPosition (total positions: ${logits[0].size})")
+
+                        val lastTokenLogits = logits[0][lastTokenPosition]
+                        val tokenId = lastTokenLogits.indices.maxByOrNull { lastTokenLogits[it] } ?: eosTokenId
+
+                        Log.d(TAG, "Selected token ID: $tokenId (max logit: ${lastTokenLogits[tokenId]})")
+                        tokenId
+                    }
+                    else -> {
+                        Log.e(TAG, "Unexpected logits type: ${logitsOutput?.javaClass?.name}")
+                        throw Exception("Unsupported decoder output format: ${logitsOutput?.javaClass?.name}")
+                    }
                 }
-                else -> {
-                    Log.e(TAG, "Unexpected logits type: ${logitsOutput?.javaClass?.name}")
-                    throw Exception("Unsupported decoder output format: ${logitsOutput?.javaClass?.name}")
+
+                // Clean up input tensor for this iteration
+                decoderInputTensor.close()
+
+                // Clean up old pastKeyValues before replacing
+                pastKeyValues?.close()
+
+                // Store new pastKeyValues for next iteration
+                pastKeyValues = decoderResults
+
+                // Check for EOS
+                Log.d(TAG, "Token check: nextTokenId=$nextTokenId, eosTokenId=$eosTokenId, match=${nextTokenId == eosTokenId}")
+
+                if (nextTokenId == eosTokenId) {
+                    Log.d(TAG, "✓ Reached EOS token at step $step - stopping generation")
+                    break
                 }
+
+                generatedIds.add(nextTokenId)
+                Log.d(TAG, "✓ Added token $nextTokenId - total tokens now: ${generatedIds.size}")
             }
 
-            // Clean up
-            decoderInputTensor.close()
-            encoderMaskTensor.close()
-            decoderResults.close()
-
-            // Check for EOS
-            Log.d(TAG, "Token check: nextTokenId=$nextTokenId, eosTokenId=$eosTokenId, match=${nextTokenId == eosTokenId}")
-
-            if (nextTokenId == eosTokenId) {
-                Log.d(TAG, "✓ Reached EOS token at step $step - stopping generation")
-                break
-            }
-
-            generatedIds.add(nextTokenId)
-            Log.d(TAG, "✓ Added token $nextTokenId - total tokens now: ${generatedIds.size}")
-            }
-
-        Log.d(TAG, "Decoder loop finished. Total generated tokens: ${generatedIds.size}")
+            Log.d(TAG, "Decoder loop finished. Total generated tokens: ${generatedIds.size}")
 
             // Remove the language code start token
             return generatedIds.drop(1).toIntArray()
         } finally {
-            // Clean up encoder output tensor
+            // Clean up resources
             encoderOutputTensor.close()
+            encoderMaskTensor.close()
+            pastKeyValues?.close()
         }
     }
 
     fun cleanup() {
         encoderSession?.close()
         decoderSession?.close()
+        decoderWithPastSession?.close()
         encoderSession = null
         decoderSession = null
+        decoderWithPastSession = null
     }
 }
