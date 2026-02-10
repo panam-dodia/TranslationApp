@@ -42,8 +42,7 @@ class MainActivity : ComponentActivity() {
                             onStartListeningPerson1 = viewModel::startListeningPerson1,
                             onStartListeningPerson2 = viewModel::startListeningPerson2,
                             onStopListening = viewModel::stopListening,
-                            onClearError = viewModel::clearError,
-                            onDownloadModels = viewModel::downloadModelsIfNeeded
+                            onClearError = viewModel::clearError
                         )
                     }
                 }

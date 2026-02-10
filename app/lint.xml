@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<lint>
+    <!-- Suppress false positive PropertyEscape in gradle.properties -->
+    <issue id="PropertyEscape" severity="ignore" />
+
+    <!-- Version warnings are informational, not critical -->
+    <issue id="NewerVersionAvailable" severity="informational" />
+    <issue id="GradleDependency" severity="informational" />
+    <issue id="AndroidGradlePluginVersion" severity="informational" />
+
+    <!-- UseTomlInstead is preference, not requirement -->
+    <issue id="UseTomlInstead" severity="informational" />
+</lint>

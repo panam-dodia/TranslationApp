@@ -1,130 +1,79 @@
-# Two-Way Translation App
+# Translation App
 
-A professional on-device translation app with speech recognition and text-to-speech capabilities, built with ONNX Runtime for production-ready performance.
+A modern, minimalist real-time translation app for Android built with Jetpack Compose and powered by Google's Gemini AI.
 
 ## Features
 
-- **Two-Way Translation**: Real-time bidirectional translation between multiple languages
-- **Speech Recognition**: Speak in your language and get instant transcription
-- **Text-to-Speech**: Hear the translated text in the target language
-- **On-Device Processing**: Uses ONNX Runtime for fast, private, offline translation
-- **On-Demand Model Downloads**: Downloads translation models only when needed
-- **Smart Model Management**: Shares models efficiently (e.g., one English model for en→es and en→fr)
-- **Professional UI**: Minimal, clean design with startup-quality aesthetics
-- **Multiple Languages**: Supports 12 languages including English, Spanish, French, German, Chinese, Japanese, and more
+- Real-time voice translation between 12 languages
+- Clean, startup-inspired UI design with minimal colors
+- Bidirectional conversation support
+- Text-to-speech output
+- Fast, cloud-based translation using Gemini 2.5 Flash
+- Understanding of idioms, phrases, and natural language
+
+## Supported Languages
+
+- English, Spanish, French, German, Italian, Portuguese
+- Chinese, Japanese, Korean
+- Arabic, Russian, Hindi
 
 ## Architecture
 
 ### Technology Stack
 
-- **ONNX Runtime**: Production-ready inference engine for on-device translation
-- **OPUS-MT Models**: High-quality multilingual translation models from Helsinki-NLP
-- **Jetpack Compose**: Modern UI toolkit with Material 3 design
+- **Gemini API**: Google's Gemini 2.5 Flash model for translation
+- **Jetpack Compose**: Modern UI toolkit with Material Design 3
 - **Kotlin Coroutines**: Asynchronous operations and flow-based state management
+- **Retrofit**: HTTP client for API calls
 - **Android Speech APIs**: Native speech recognition and text-to-speech
 
 ### Key Components
 
-1. **ONNXTranslationService**: Manages ONNX Runtime sessions and model inference
-2. **ModelDownloader**: Downloads translation models on-demand
-3. **ONNXInferenceEngine**: Encoder-decoder inference with auto-regressive decoding
-4. **MarianTokenizer**: Tokenization and detokenization for OPUS-MT models
-5. **SpeechRecognitionService**: Handles speech-to-text conversion
-6. **TextToSpeechService**: Converts translated text to speech
-7. **TranslationViewModel**: Coordinates all services and manages app state
-8. **TranslationScreen**: Professional minimal UI with two-person layout
+1. **GeminiTranslationService**: Manages API calls to Gemini
+2. **SpeechRecognitionService**: Handles speech-to-text conversion
+3. **TextToSpeechService**: Converts translated text to speech
+4. **TranslationViewModel**: Coordinates all services and manages app state
+5. **TranslationScreen**: Minimal, modern UI with two-person layout
 
-## How It Works
+## Setup
 
-### Model Management
+### Prerequisites
 
-The app uses **on-demand model downloading**:
+- Android Studio Hedgehog or newer
+- Android SDK with API level 26+
+- Gemini API Key from [Google AI Studio](https://makersuite.google.com/app/apikey)
 
-1. **No Bundled Models**: Models are NOT included in the APK (keeps app size small)
-2. **Download When Needed**: When user selects a language pair, app checks if model exists
-3. **One-Time Download**: Models are cached locally and reused
-4. **Smart Sharing**: Models are organized by language pair (en→es, es→en as separate models)
+### Installation
 
-**Example:**
-- User selects English ↔ Spanish
-- App downloads `en-es` model (~200-300MB)
-- App downloads `es-en` model (~200-300MB)
-- Models stored in `app_files/models/en-es/` and `app_files/models/es-en/`
-- Next time user selects this pair, models load instantly from disk
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/yourusername/TranslationApp.git
+   cd TranslationApp
+   ```
 
-### Current Setup
+2. Copy the local properties template:
+   ```bash
+   cp local.properties.template local.properties
+   ```
 
-Your `assets/` folder has the **en→es** model. On first run, it will be automatically migrated to `app_files/models/en-es/`.
+3. Edit `local.properties` and add your Gemini API key:
+   ```properties
+   GEMINI_API_KEY=your_actual_gemini_api_key_here
+   ```
 
-## Setup Instructions
+4. Open the project in Android Studio
 
-### 1. Prerequisites
-
-- Android Studio Hedgehog or later
-- Android SDK 26 (Android 8.0) or higher
-- Models hosted on a server/CDN (for download functionality)
-
-### 2. Converting OPUS-MT to ONNX (For Hosting)
-
-Convert OPUS-MT models to ONNX format using Google Colab (avoids local environment issues):
-
-```bash
-# Install dependencies
-pip install transformers torch onnx
-
-# Convert a model (example: English to Spanish)
-python -m transformers.onnx \
-  --model=Helsinki-NLP/opus-mt-en-es \
-  --feature=seq2seq-lm \
-  onnx/en-es/
-
-# This creates: encoder_model.onnx, decoder_model.onnx, etc.
-# You'll need to merge or use them appropriately
-```
-
-### 3. Host Models for Download
-
-**Option A: Use GitHub Releases (Free)**
-1. Convert OPUS-MT models to ONNX
-2. Create a GitHub release in your repo
-3. Upload model files as release assets
-4. Update `ModelDownloader.kt` with direct download URLs
-
-**Option B: Use Cloud Storage (Better)**
-1. Upload models to AWS S3, Google Cloud Storage, or Firebase Storage
-2. Generate public URLs for each model
-3. Update `ModelDownloader.kt` with the URLs
-
-**Example URL structure:**
-```
-https://your-cdn.com/models/en-es/encoder_model.onnx
-https://your-cdn.com/models/en-es/decoder_with_past_model.onnx
-https://your-cdn.com/models/en-es/vocab.json
-...
-```
-
-### 4. Configure Model URLs
-
-Edit `ModelDownloader.kt` and update the `getModelBaseUrl` function:
-
-```kotlin
-private fun getModelBaseUrl(fromLang: Language, toLang: Language): String? {
-    val modelKey = "${fromLang.code}-${toLang.code}"
-    return "https://your-cdn.com/models/$modelKey"
-}
-```
-
-**That's it!** The app will now download models on-demand.
+5. Build and run on your device or emulator
 
 ## Usage
 
 ### Basic Flow
 
-1. **Select Languages**: Tap language names to choose source and target languages
+1. **Select Languages**: Choose your language and their language
 2. **Speak**: Tap the microphone button for your side
 3. **Translate**: Speech is automatically transcribed and translated
 4. **Listen**: The translation is spoken in the target language
-5. **Swap**: Use the center swap button to reverse languages
+5. **Swap**: Use the swap button to reverse languages
 
 ### Two-Person Conversation
 
@@ -133,6 +82,14 @@ private fun getModelBaseUrl(fromLang: Language, toLang: Language): String? {
 - Each person's speech is translated to the other's language
 - Translations are displayed and spoken automatically
 
+## Design Philosophy
+
+The UI follows modern startup design principles:
+- **Minimal color palette**: Only 5 colors (indigo accent, slate black, gray, white, light accent)
+- **Generous whitespace**: Clean, uncluttered layouts
+- **Simple typography**: Clear, readable text hierarchy
+- **Intuitive interactions**: Obvious actions without unnecessary complexity
+
 ## Customization
 
 ### UI Colors
@@ -140,91 +97,35 @@ private fun getModelBaseUrl(fromLang: Language, toLang: Language): String? {
 Edit `app/src/main/java/com/panam/translationapp/ui/theme/Color.kt`:
 
 ```kotlin
-val AccentBlue = Color(0xFF2196F3) // Change accent color
+val Accent = Color(0xFF6366F1)  // Change accent color
 ```
 
-### Supported Languages
+### Add Languages
 
-Add more languages in `Language.kt`:
+Edit `app/src/main/java/com/panam/translationapp/translation/Language.kt`:
 
 ```kotlin
 enum class Language(val displayName: String, val code: String) {
     // Add new languages here
-    PORTUGUESE("Portuguese", "pt"),
+    VIETNAMESE("Vietnamese", "vi"),
 }
 ```
 
-### Model Configuration
+## API
 
-For production deployment:
+This app uses the Gemini 2.5 Flash model for translation:
+- Fast response times
+- High translation accuracy
+- Understanding of idioms and colloquialisms
+- Natural conversation flow
+- Support for 100+ languages (currently using 12)
 
-1. Optimize ONNX models with quantization for smaller size
-2. Enable NNAPI execution provider for hardware acceleration
-3. Implement model caching and lazy loading
-4. Add model versioning and updates
+## Security
 
-## Performance Optimization
-
-### NNAPI Acceleration
-
-Enable in `ONNXTranslationService.kt`:
-
-```kotlin
-val sessionOptions = OrtSession.SessionOptions().apply {
-    addNNAPI()
-}
-```
-
-### Model Quantization
-
-Reduce model size by 4x with minimal accuracy loss:
-
-```bash
-python -m onnxruntime.quantization.quantize \
-  --model model.onnx \
-  --output model_quant.onnx \
-  --per_channel
-```
-
-## Production Checklist
-
-- [ ] Convert all needed OPUS-MT models to ONNX
-- [ ] Set up model hosting (CDN/server)
-- [ ] Implement proper tokenization (SentencePiece)
-- [ ] Add model download UI with progress
-- [ ] Enable NNAPI for hardware acceleration
-- [ ] Test on various Android devices
-- [ ] Implement error handling and retry logic
-- [ ] Add analytics for translation quality
-- [ ] Optimize app size with ProGuard/R8
-- [ ] Add offline mode indicator
-
-## Troubleshooting
-
-### Models Not Found
-
-Ensure models are properly placed in `app/files/models/` or implement download functionality.
-
-### Translation Quality Issues
-
-1. Verify tokenizer matches OPUS-MT requirements
-2. Check model is correctly converted to ONNX
-3. Ensure proper input/output tensor handling
-
-### Performance Issues
-
-1. Enable NNAPI execution provider
-2. Use quantized models
-3. Implement model caching
-4. Profile with Android Studio Profiler
-
-## Resources
-
-- [ONNX Runtime Android](https://onnxruntime.ai/docs/install/)
-- [OPUS-MT Models](https://github.com/Helsinki-NLP/Opus-MT)
-- [ONNX Model Conversion](https://huggingface.co/docs/transformers/serialization)
-- [Android Speech APIs](https://developer.android.com/reference/android/speech/package-summary)
+- API keys are stored in `local.properties` (gitignored)
+- Never commit `local.properties` to version control
+- Use `local.properties.template` for setup instructions
 
 ## License
 
-MIT License - Feel free to use in your projects
+This project is open source and available under the [MIT License](LICENSE).

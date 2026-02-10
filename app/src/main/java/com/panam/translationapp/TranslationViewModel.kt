@@ -6,8 +6,8 @@ import androidx.lifecycle.viewModelScope
 import com.panam.translationapp.speech.SpeechRecognitionResult
 import com.panam.translationapp.speech.SpeechRecognitionService
 import com.panam.translationapp.speech.TextToSpeechService
+import com.panam.translationapp.translation.GeminiTranslationService
 import com.panam.translationapp.translation.Language
-import com.panam.translationapp.translation.NLLBTranslationService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -23,17 +23,13 @@ data class TranslationState(
     val isListeningPerson1: Boolean = false,
     val isListeningPerson2: Boolean = false,
     val isSpeaking: Boolean = false,
+    val isTranslating: Boolean = false,
     val error: String? = null,
-    val person1ToPerson2ModelDownloaded: Boolean = false,
-    val person2ToPerson1ModelDownloaded: Boolean = false,
-    val isDownloadingModel: Boolean = false,
-    val downloadProgress: Float = 0f,
-    val downloadMessage: String = "",
     val audioLevel: Float = 0f
 )
 
 class TranslationViewModel(application: Application) : AndroidViewModel(application) {
-    private val translationService = NLLBTranslationService(application)
+    private val translationService = GeminiTranslationService(application)
     private val speechRecognitionService = SpeechRecognitionService(application)
     private val ttsService = TextToSpeechService(application)
 
@@ -48,17 +44,14 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
                 person2Language = language2
             )
         }
-        checkModelsDownloaded()
     }
 
     fun setPerson1Language(language: Language) {
         _state.update { it.copy(person1Language = language) }
-        checkModelsDownloaded()
     }
 
     fun setPerson2Language(language: Language) {
         _state.update { it.copy(person2Language = language) }
-        checkModelsDownloaded()
     }
 
     fun swapLanguages() {
@@ -70,7 +63,6 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
                 person2Text = it.person1Text
             )
         }
-        checkModelsDownloaded()
     }
 
     fun startListeningPerson1() {
@@ -136,13 +128,15 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
             val lang1 = _state.value.person1Language ?: return@launch
             val lang2 = _state.value.person2Language ?: return@launch
 
+            _state.update { it.copy(isTranslating = true, error = null) }
+
             val result = translationService.translate(text, lang1, lang2)
 
             result.onSuccess { translatedText ->
-                _state.update { it.copy(person2Text = translatedText) }
+                _state.update { it.copy(person2Text = translatedText, isTranslating = false) }
                 speakPerson2(translatedText)
             }.onFailure { error ->
-                _state.update { it.copy(error = error.message) }
+                _state.update { it.copy(error = error.message ?: "Translation failed", isTranslating = false) }
             }
         }
     }
@@ -152,13 +146,15 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
             val lang1 = _state.value.person2Language ?: return@launch
             val lang2 = _state.value.person1Language ?: return@launch
 
+            _state.update { it.copy(isTranslating = true, error = null) }
+
             val result = translationService.translate(text, lang1, lang2)
 
             result.onSuccess { translatedText ->
-                _state.update { it.copy(person1Text = translatedText) }
+                _state.update { it.copy(person1Text = translatedText, isTranslating = false) }
                 speakPerson1(translatedText)
             }.onFailure { error ->
-                _state.update { it.copy(error = error.message) }
+                _state.update { it.copy(error = error.message ?: "Translation failed", isTranslating = false) }
             }
         }
     }
@@ -188,57 +184,6 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
 
     fun clearError() {
         _state.update { it.copy(error = null) }
-    }
-
-    fun downloadModelsIfNeeded() {
-        viewModelScope.launch {
-            // Check if NLLB model is already downloaded
-            if (translationService.isLanguageDownloaded(Language.ENGLISH)) {
-                // Model already downloaded (one model handles ALL language pairs)
-                checkModelsDownloaded()
-                return@launch
-            }
-
-            _state.update { it.copy(isDownloadingModel = true) }
-
-            // Download single NLLB model (~890MB) that handles ALL language pairs
-            val result = translationService.downloadModel { message, progress ->
-                _state.update {
-                    it.copy(
-                        downloadMessage = message,
-                        downloadProgress = progress
-                    )
-                }
-            }
-
-            if (result.isFailure) {
-                _state.update {
-                    it.copy(
-                        error = "Failed to download NLLB model: ${result.exceptionOrNull()?.message}",
-                        isDownloadingModel = false
-                    )
-                }
-                return@launch
-            }
-
-            _state.update { it.copy(isDownloadingModel = false, downloadProgress = 0f, downloadMessage = "") }
-            checkModelsDownloaded()
-        }
-    }
-
-    private fun checkModelsDownloaded() {
-        val lang1 = _state.value.person1Language ?: return
-        val lang2 = _state.value.person2Language ?: return
-
-        // With NLLB, single model handles ALL language pairs in both directions
-        val modelDownloaded = translationService.isModelDownloaded(lang1, lang2)
-
-        _state.update {
-            it.copy(
-                person1ToPerson2ModelDownloaded = modelDownloaded,
-                person2ToPerson1ModelDownloaded = modelDownloaded
-            )
-        }
     }
 
     override fun onCleared() {

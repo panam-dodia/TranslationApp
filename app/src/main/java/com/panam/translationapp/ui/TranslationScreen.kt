@@ -1,11 +1,10 @@
 package com.panam.translationapp.ui
 
 import android.Manifest
-import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.SwapVert
@@ -15,7 +14,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -36,10 +34,8 @@ fun TranslationScreen(
     onStartListeningPerson1: () -> Unit,
     onStartListeningPerson2: () -> Unit,
     onStopListening: () -> Unit,
-    onClearError: () -> Unit,
-    onDownloadModels: () -> Unit
+    onClearError: () -> Unit
 ) {
-    // Early return if languages not set
     val person1Language = state.person1Language ?: return
     val person2Language = state.person2Language ?: return
 
@@ -59,10 +55,10 @@ fun TranslationScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(24.dp),
+                .padding(horizontal = 32.dp, vertical = 24.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // Person 1 Section (Top)
+            // Person 1 Section
             PersonSection(
                 language = person1Language,
                 text = state.person1Text,
@@ -80,18 +76,26 @@ fun TranslationScreen(
                 modifier = Modifier.weight(1f)
             )
 
-            // Center Controls
-            CenterControls(
-                person1Language = person1Language,
-                person2Language = person2Language,
-                person1ToPerson2ModelDownloaded = state.person1ToPerson2ModelDownloaded,
-                person2ToPerson1ModelDownloaded = state.person2ToPerson1ModelDownloaded,
-                onSwapLanguages = onSwapLanguages,
-                onDownloadModels = onDownloadModels,
-                modifier = Modifier.padding(vertical = 16.dp)
-            )
+            Spacer(modifier = Modifier.height(12.dp))
 
-            // Person 2 Section (Bottom)
+            // Swap Button
+            IconButton(
+                onClick = onSwapLanguages,
+                modifier = Modifier
+                    .align(Alignment.CenterHorizontally)
+                    .size(48.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.SwapVert,
+                    contentDescription = "Swap languages",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(28.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Person 2 Section
             PersonSection(
                 language = person2Language,
                 text = state.person2Text,
@@ -126,14 +130,6 @@ fun TranslationScreen(
                 Text(error)
             }
         }
-
-        // Download overlay - rendered last so it appears on top
-        if (state.isDownloadingModel) {
-            ModelDownloadOverlay(
-                message = state.downloadMessage,
-                progress = state.downloadProgress
-            )
-        }
     }
 }
 
@@ -159,39 +155,8 @@ fun PersonSection(
                 selectedLanguage = language,
                 onLanguageChange = onLanguageChange
             )
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(24.dp))
         }
-
-        // Text Display
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f),
-            color = MaterialTheme.colorScheme.surfaceVariant,
-            shape = RoundedCornerShape(16.dp)
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(20.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = if (text.isEmpty()) "Tap to speak" else text,
-                    style = MaterialTheme.typography.bodyLarge.copy(
-                        fontSize = 18.sp,
-                        lineHeight = 28.sp
-                    ),
-                    color = if (text.isEmpty())
-                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                    else
-                        MaterialTheme.colorScheme.onSurface,
-                    textAlign = TextAlign.Center
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
 
         // Mic Button
         MicButton(
@@ -201,8 +166,30 @@ fun PersonSection(
             onStopListening = onStopListening
         )
 
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Text Display
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = if (text.isEmpty()) "" else text,
+                style = MaterialTheme.typography.headlineSmall.copy(
+                    fontSize = 22.sp,
+                    lineHeight = 32.sp,
+                    fontWeight = FontWeight.Normal
+                ),
+                color = MaterialTheme.colorScheme.onBackground,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 16.dp)
+            )
+        }
+
         if (isBottom) {
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(24.dp))
             LanguageSelector(
                 selectedLanguage = language,
                 onLanguageChange = onLanguageChange
@@ -222,13 +209,14 @@ fun LanguageSelector(
         TextButton(
             onClick = { expanded = true },
             colors = ButtonDefaults.textButtonColors(
-                contentColor = MaterialTheme.colorScheme.onBackground
+                contentColor = MaterialTheme.colorScheme.secondary
             )
         ) {
             Text(
                 text = selectedLanguage.displayName,
                 style = MaterialTheme.typography.titleMedium.copy(
-                    fontWeight = FontWeight.Medium
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 16.sp
                 )
             )
         }
@@ -239,7 +227,12 @@ fun LanguageSelector(
         ) {
             Language.entries.forEach { language ->
                 DropdownMenuItem(
-                    text = { Text(language.displayName) },
+                    text = {
+                        Text(
+                            text = language.displayName,
+                            fontWeight = if (language == selectedLanguage) FontWeight.SemiBold else FontWeight.Normal
+                        )
+                    },
                     onClick = {
                         onLanguageChange(language)
                         expanded = false
@@ -257,20 +250,36 @@ fun MicButton(
     onStartListening: () -> Unit,
     onStopListening: () -> Unit
 ) {
-    val scale by animateFloatAsState(
-        targetValue = if (isListening) 1f + (audioLevel / 50f).coerceIn(0f, 0.3f) else 1f,
-        label = "micScale"
+    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+    val pulseScale by infiniteTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = 1.15f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1000, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulseScale"
     )
 
-    Box(contentAlignment = Alignment.Center) {
-        // Pulse effect when listening
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier.size(100.dp)
+    ) {
+        // Pulse rings when listening
         if (isListening) {
             Box(
                 modifier = Modifier
-                    .size(80.dp)
-                    .scale(scale)
+                    .size(100.dp)
+                    .scale(pulseScale)
                     .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
+            )
+            Box(
+                modifier = Modifier
+                    .size(88.dp)
+                    .scale(pulseScale * 0.95f)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
             )
         }
 
@@ -279,164 +288,19 @@ fun MicButton(
             onClick = {
                 if (isListening) onStopListening() else onStartListening()
             },
-            modifier = Modifier
-                .size(64.dp)
-                .scale(if (isListening) scale else 1f),
+            modifier = Modifier.size(72.dp),
             colors = IconButtonDefaults.filledIconButtonColors(
-                containerColor = if (isListening)
-                    MaterialTheme.colorScheme.primary
-                else
-                    MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = if (isListening)
-                    MaterialTheme.colorScheme.onPrimary
-                else
-                    MaterialTheme.colorScheme.onSurfaceVariant
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary
             )
         ) {
             Icon(
                 imageVector = Icons.Default.Mic,
                 contentDescription = if (isListening) "Stop" else "Start",
-                modifier = Modifier.size(28.dp)
+                modifier = Modifier.size(32.dp)
             )
         }
     }
 }
 
-@Composable
-fun CenterControls(
-    person1Language: Language,
-    person2Language: Language,
-    person1ToPerson2ModelDownloaded: Boolean,
-    person2ToPerson1ModelDownloaded: Boolean,
-    onSwapLanguages: () -> Unit,
-    onDownloadModels: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Column(
-        modifier = modifier.fillMaxWidth(),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Row(
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Language display
-            Text(
-                text = person1Language.code,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f)
-            )
 
-            Spacer(modifier = Modifier.width(12.dp))
-
-            // Swap button
-            FilledTonalIconButton(
-                onClick = onSwapLanguages,
-                modifier = Modifier.size(40.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.SwapVert,
-                    contentDescription = "Swap languages",
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-
-            Spacer(modifier = Modifier.width(12.dp))
-
-            Text(
-                text = person2Language.code,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f)
-            )
-        }
-
-        // Show download button if models not available
-        if (!person1ToPerson2ModelDownloaded || !person2ToPerson1ModelDownloaded) {
-            Spacer(modifier = Modifier.height(12.dp))
-            Button(
-                onClick = onDownloadModels,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary
-                )
-            ) {
-                Text(
-                    text = "Download Model (~890MB)",
-                    style = MaterialTheme.typography.labelMedium
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun ModelDownloadOverlay(
-    message: String,
-    progress: Float
-) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.85f)),
-        contentAlignment = Alignment.Center
-    ) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth(0.85f)
-                .padding(32.dp),
-            color = MaterialTheme.colorScheme.surface,
-            shape = RoundedCornerShape(16.dp),
-            tonalElevation = 8.dp
-        ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.padding(24.dp)
-            ) {
-                Text(
-                    text = "Downloading NLLB Model",
-                    style = MaterialTheme.typography.titleLarge.copy(
-                        fontWeight = FontWeight.SemiBold
-                    ),
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Text(
-                    text = "This may take a few minutes",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                )
-
-                Spacer(modifier = Modifier.height(24.dp))
-
-                LinearProgressIndicator(
-                    progress = { progress },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(6.dp)
-                        .clip(RoundedCornerShape(3.dp)),
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                Text(
-                    text = if (message.isNotEmpty()) message else "Preparing download...",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                    textAlign = TextAlign.Center,
-                    maxLines = 2
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Text(
-                    text = "${(progress * 100).toInt()}%",
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = FontWeight.Bold
-                    ),
-                    color = MaterialTheme.colorScheme.primary
-                )
-            }
-        }
-    }
-}
