@@ -70,6 +70,10 @@ class TextToSpeechService(context: Context) {
         }
     }
 
+    fun setSpeechRate(rate: Float) {
+        tts?.setSpeechRate(rate)
+    }
+
     fun stop() {
         tts?.stop()
     }

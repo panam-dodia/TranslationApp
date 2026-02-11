@@ -98,6 +98,59 @@ class GeminiTranslationService(private val context: Context) {
         }
     }
 
+    suspend fun chatWithAI(prompt: String): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            if (prompt.isBlank()) {
+                return@withContext Result.failure(Exception("Prompt cannot be empty"))
+            }
+
+            // Create request
+            val request = GeminiRequest(
+                contents = listOf(
+                    Content(
+                        parts = listOf(Part(text = prompt))
+                    )
+                ),
+                generationConfig = GenerationConfig(
+                    temperature = 0.7,
+                    maxOutputTokens = 2048
+                )
+            )
+
+            // Make API call
+            val response = apiService.generateContent(apiKey, request)
+
+            if (response.isSuccessful) {
+                val geminiResponse = response.body()
+
+                // Check for blocked content
+                geminiResponse?.promptFeedback?.blockReason?.let { reason ->
+                    return@withContext Result.failure(Exception("Content blocked: $reason"))
+                }
+
+                // Extract AI response
+                val aiResponse = geminiResponse
+                    ?.candidates
+                    ?.firstOrNull()
+                    ?.content
+                    ?.parts
+                    ?.firstOrNull()
+                    ?.text
+                    ?.trim()
+
+                if (aiResponse.isNullOrBlank()) {
+                    return@withContext Result.failure(Exception("Empty response from API"))
+                }
+
+                Result.success(aiResponse)
+            } else {
+                Result.failure(Exception("API Error: ${response.code()} - ${response.message()}"))
+            }
+        } catch (e: Exception) {
+            Result.failure(Exception("AI chat failed: ${e.message}", e))
+        }
+    }
+
     private fun buildTranslationPrompt(
         text: String,
         fromLanguage: Language,
