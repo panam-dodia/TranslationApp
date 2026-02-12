@@ -12,6 +12,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -28,6 +29,7 @@ fun SettingsScreen(
     ttsSpeed: Float,
     onTTSSpeedChange: (Float) -> Unit,
     onClearAllHistory: () -> Unit,
+    onNavigateToSubscription: () -> Unit,
     onBackClick: () -> Unit = {}
 ) {
     var showClearHistoryDialog by remember { mutableStateOf(false) }
@@ -78,8 +80,31 @@ fun SettingsScreen(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            // Subscription Section
+            item {
+                SectionHeader(title = "Subscription")
+            }
+
+            item {
+                SettingsItem(
+                    icon = Icons.Default.Star,
+                    title = "Manage Subscription",
+                    subtitle = "View trial status and subscription",
+                    onClick = onNavigateToSubscription,
+                    iconTint = MaterialTheme.colorScheme.primary,
+                    trailing = {
+                        Icon(
+                            imageVector = Icons.Default.ChevronRight,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                )
+            }
+
             // Appearance Section
             item {
+                Spacer(modifier = Modifier.height(8.dp))
                 SectionHeader(title = "Appearance")
             }
 

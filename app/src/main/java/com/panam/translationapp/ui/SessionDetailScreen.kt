@@ -23,6 +23,12 @@ import java.time.format.DateTimeFormatter
 import android.content.Context
 import android.content.Intent
 import android.widget.Toast
+import androidx.core.content.FileProvider
+import com.panam.translationapp.utils.PDFExporter
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -31,6 +37,7 @@ fun SessionDetailScreen(
     onBackClick: () -> Unit
 ) {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
 
     Scaffold(
         topBar = {
@@ -60,12 +67,14 @@ fun SessionDetailScreen(
                 actions = {
                     IconButton(
                         onClick = {
-                            exportSession(context, session)
+                            coroutineScope.launch {
+                                exportSessionToPDF(context, session)
+                            }
                         }
                     ) {
                         Icon(
                             imageVector = Icons.Default.Share,
-                            contentDescription = "Export",
+                            contentDescription = "Export PDF",
                             tint = MaterialTheme.colorScheme.primary
                         )
                     }
@@ -432,75 +441,47 @@ fun EmptySessionDetail(modifier: Modifier = Modifier) {
     }
 }
 
-private fun exportSession(context: Context, session: Session) {
-    val exportText = buildString {
-        appendLine("=" * 50)
-        appendLine("CONVERSATION EXPORT")
-        appendLine("=" * 50)
-        appendLine()
-        appendLine("Session: ${session.getDisplayName()}")
-        appendLine("Languages: ${session.person1Language.displayName} ↔ ${session.person2Language.displayName}")
-        appendLine("Date: ${session.createdAt.format(DateTimeFormatter.ofPattern("MMMM dd, yyyy 'at' h:mm a"))}")
-        appendLine("Total Translations: ${session.translations.size}")
-        appendLine("Total AI Questions: ${session.chatMessages.filter { it.isFromUser }.size}")
-        appendLine()
-        appendLine("=" * 50)
-        appendLine()
-
-        if (session.translations.isNotEmpty()) {
-            appendLine("TRANSLATIONS")
-            appendLine("-" * 50)
-            appendLine()
-            session.translations.forEachIndexed { index, translation ->
-                appendLine("Translation #${index + 1}")
-                appendLine("Time: ${translation.timestamp.format(DateTimeFormatter.ofPattern("h:mm a"))}")
-                appendLine()
-                appendLine("${session.person1Language.displayName}:")
-                appendLine(translation.person1Text)
-                appendLine()
-                appendLine("${session.person2Language.displayName}:")
-                appendLine(translation.person2Text)
-                appendLine()
-                appendLine("-" * 30)
-                appendLine()
-            }
-        }
-
-        if (session.chatMessages.isNotEmpty()) {
-            appendLine()
-            appendLine("=" * 50)
-            appendLine()
-            appendLine("AI CONVERSATIONS")
-            appendLine("-" * 50)
-            appendLine()
-            session.chatMessages.forEach { message ->
-                val sender = if (message.isFromUser) "You" else "AI Assistant"
-                val time = message.timestamp.format(DateTimeFormatter.ofPattern("h:mm a"))
-                appendLine("[$time] $sender:")
-                appendLine(message.text)
-                appendLine()
-            }
-        }
-
-        appendLine()
-        appendLine("=" * 50)
-        appendLine("End of Export")
-        appendLine("=" * 50)
-    }
-
-    // Share using Android Share Sheet
-    val shareIntent = Intent().apply {
-        action = Intent.ACTION_SEND
-        type = "text/plain"
-        putExtra(Intent.EXTRA_TEXT, exportText)
-        putExtra(Intent.EXTRA_TITLE, session.getDisplayName())
-    }
-
+private suspend fun exportSessionToPDF(context: Context, session: Session) {
     try {
-        context.startActivity(Intent.createChooser(shareIntent, "Export Conversation"))
+        // Show loading toast
+        withContext(Dispatchers.Main) {
+            Toast.makeText(context, "Generating PDF...", Toast.LENGTH_SHORT).show()
+        }
+
+        // Generate PDF on IO thread
+        val pdfFile = withContext(Dispatchers.IO) {
+            PDFExporter.exportSessionToPDF(context, session)
+        }
+
+        if (pdfFile != null && pdfFile.exists()) {
+            // Get URI using FileProvider
+            val uri = FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                pdfFile
+            )
+
+            // Share PDF using Android Share Sheet
+            val shareIntent = Intent().apply {
+                action = Intent.ACTION_SEND
+                type = "application/pdf"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                putExtra(Intent.EXTRA_SUBJECT, session.getDisplayName())
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+
+            withContext(Dispatchers.Main) {
+                context.startActivity(Intent.createChooser(shareIntent, "Export PDF"))
+            }
+        } else {
+            withContext(Dispatchers.Main) {
+                Toast.makeText(context, "Failed to generate PDF", Toast.LENGTH_SHORT).show()
+            }
+        }
     } catch (e: Exception) {
-        Toast.makeText(context, "Failed to export: ${e.message}", Toast.LENGTH_SHORT).show()
+        e.printStackTrace()
+        withContext(Dispatchers.Main) {
+            Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
     }
 }
-
-private operator fun String.times(n: Int): String = repeat(n)

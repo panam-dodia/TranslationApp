@@ -13,6 +13,9 @@ import com.panam.translationapp.data.SessionManager
 import com.panam.translationapp.data.TranslationRecord
 import com.panam.translationapp.translation.GeminiTranslationService
 import com.panam.translationapp.translation.Language
+import com.panam.translationapp.billing.BillingManager
+import com.panam.translationapp.billing.SubscriptionManager
+import com.panam.translationapp.billing.SubscriptionStatus
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -42,6 +45,12 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
 
     private val sessionManager = SessionManager()
     private val preferencesManager = PreferencesManager(application)
+
+    // Subscription and Billing
+    val subscriptionManager = SubscriptionManager(application)
+    private var _billingManager: BillingManager? = null
+    val billingManager: BillingManager?
+        get() = _billingManager
 
     private val _state = MutableStateFlow(TranslationState())
     val state: StateFlow<TranslationState> = _state.asStateFlow()
@@ -73,6 +82,26 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
 
     private val _isChatLoading = MutableStateFlow(false)
     val isChatLoading: StateFlow<Boolean> = _isChatLoading.asStateFlow()
+
+    // Subscription status
+    val subscriptionStatus: StateFlow<SubscriptionStatus> = subscriptionManager.getSubscriptionStatusFlow().stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = SubscriptionStatus.Trial(7)
+    )
+
+    init {
+        // Initialize first install time on app launch
+        viewModelScope.launch {
+            subscriptionManager.initializeFirstInstall()
+        }
+    }
+
+    fun initializeBillingManager() {
+        if (_billingManager == null) {
+            _billingManager = BillingManager(getApplication(), subscriptionManager)
+        }
+    }
 
     fun setLanguages(language1: Language, language2: Language) {
         _state.update {
@@ -381,5 +410,6 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         translationService.cleanup()
         speechRecognitionService.cleanup()
         ttsService.cleanup()
+        _billingManager?.endConnection()
     }
 }

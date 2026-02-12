@@ -18,6 +18,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import androidx.navigation.NavType
+import androidx.compose.runtime.LaunchedEffect
 import com.panam.translationapp.navigation.Screen
 import com.panam.translationapp.ui.*
 import com.panam.translationapp.ui.theme.TranslationAppTheme
@@ -88,6 +89,16 @@ fun AppNavigation(
     val isAskAILoading by viewModel.isAskAILoading.collectAsState()
     val isDarkMode by viewModel.isDarkMode.collectAsState()
     val ttsSpeed by viewModel.ttsSpeed.collectAsState()
+    val subscriptionStatus by viewModel.subscriptionStatus.collectAsState()
+
+    // Check subscription status and redirect if expired
+    LaunchedEffect(subscriptionStatus) {
+        if (subscriptionStatus is com.panam.translationapp.billing.SubscriptionStatus.Expired) {
+            navController.navigate(Screen.Subscription.route) {
+                popUpTo(0) { inclusive = true }
+            }
+        }
+    }
 
     NavHost(
         navController = navController,
@@ -185,10 +196,22 @@ fun AppNavigation(
                 ttsSpeed = ttsSpeed,
                 onTTSSpeedChange = viewModel::setTTSSpeed,
                 onClearAllHistory = viewModel::clearAllHistory,
+                onNavigateToSubscription = {
+                    navController.navigate(Screen.Subscription.route)
+                },
                 onBackClick = {
                     navController.navigate(Screen.LanguageSelection.route) {
                         popUpTo(0) { inclusive = true }
                     }
+                }
+            )
+        }
+
+        composable(Screen.Subscription.route) {
+            SubscriptionScreen(
+                viewModel = viewModel,
+                onNavigateBack = {
+                    navController.popBackStack()
                 }
             )
         }
